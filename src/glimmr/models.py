@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 
 @dataclass
@@ -57,6 +57,7 @@ class SystemData:
     black_level: int
     crop_black_level: int
     version: str
+    scenes: Dict[str, int]
 
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> SystemData:
@@ -120,7 +121,8 @@ class SystemData:
             units=data.get("units", "UNKNOWN"),
             black_level=data.get("blackLevel", "UNKNOWN"),
             crop_black_level=data.get("cropBlackLevel", "UNKNOWN"),
-            version=data.get("version", "UNKNOWN")
+            version=data.get("version", "UNKNOWN"),
+            scenes=Dict[int, str]
         )
 
     def to_dict(self):
@@ -175,5 +177,23 @@ class SystemData:
             "units": self.units,
             "blackLevel": self.black_level,
             "cropBlackLevel": self.crop_black_level,
-            "version": self.version
+            "version": self.version,
+            "scenes": self.scenes
         }
+
+    def get_id_from_scene_name(self, name) -> int:
+        if self.scenes is not None:
+            for i in self.scenes.items():
+                if i[0] == name:
+                    return i[1]
+        return -2
+
+    async def load_scenes(self, scenes: List[Dict[str,any]]):
+        scene_dict = {"Video": -2, "Audio": -3, "Ambient": -4, "Audio/Video": -5, "Streaming": -6}
+        for item in scenes:
+            scene_id = item.get("id", "UNKNOWN")
+            scene_name = item.get("name", "UNKNOWN")
+            scene_dict[scene_name] = scene_id
+
+        print("Scene dict: ", scene_dict)
+        self.scenes = scene_dict

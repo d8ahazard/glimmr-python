@@ -6,7 +6,6 @@ from .models import (  # noqa
 
 from .glimmr import (
     Glimmr,
-    GlimmrRConnectionClosed,
     GlimmrError,
     GlimmrConnectionError,
     GlimmrEmptyResponseError,
@@ -18,7 +17,6 @@ __all__ = [
     "Glimmr",
     "GlimmrError",
     "GlimmrRConnectionTimeoutError",
-    "GlimmrRConnectionClosed",
     "GlimmrEmptyResponseError",
     "GlimmrConnectionError"
 ]

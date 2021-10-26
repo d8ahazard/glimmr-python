@@ -33,7 +33,7 @@ class Glimmr:
     session: aiohttp.ClientSession | None = None
     _client: AuthHubConnection | BaseHubConnection | None = None
     _close_session: bool = False
-    _device: SystemData | None = None
+    device: SystemData | None = None
     _connected: bool = False
 
     @property
@@ -58,17 +58,16 @@ class Glimmr:
         if self.connected:
             return
 
-        if not self._device:
+        if not self.device:
             await self.update()
 
-        with Session() as session:
-            # create a connection
+        with Session():
             url = "http://" + self.host + "/socket"
             connection = HubConnectionBuilder() \
                 .with_url(url) \
                 .build()
 
-            if not self.session or not self._device:
+            if not self.session or not self.device:
                 raise GlimmrError(
                     "The Glimmr device at {self.host} does not support WebSockets"
                 )
@@ -93,12 +92,12 @@ class Glimmr:
                 ) from exception
 
     def olo(self, data):
-        self._device = SystemData.from_dict(data)
-        print("DEVICE: ", self._device)
+        self.device = SystemData.from_dict(data)
+        print("DEVICE: ", self.device)
 
     def dev_mode(self, mode):
-        if self._device is not None:
-            self._device.device_mode = mode
+        if self.device is not None:
+            self.device.device_mode = mode
 
     async def disconnect(self) -> None:
         """Disconnect from the WebSocket of a GLIMMR device."""
@@ -118,7 +117,7 @@ class Glimmr:
             method: str = "GET",
             data: int | str | Dict[str, any] | None = None,
     ) -> Any:
-        """Handle a request to a GLIMMR device.
+        """Handle a request to a Glimmr device.
 
         A generic method for sending/handling HTTP requests done gainst
         the GLIMMR device.
@@ -182,10 +181,10 @@ class Glimmr:
             if (
                     method == "POST"
                     and uri == "systemData"
-                    and self._device is not None
+                    and self.device is not None
                     and data is not None
             ):
-                self._device.from_dict(data={"glimmr_data": response_data})
+                self.device.from_dict(data={"glimmr_data": response_data})
             return response_data
 
         return await response.text()
@@ -193,14 +192,11 @@ class Glimmr:
     @backoff.on_exception(
         backoff.expo, GlimmrEmptyResponseError, max_tries=3, logger=None
     )
-    async def update(self, full_update: bool = False) -> SystemData:
+    async def update(self) -> SystemData:
         """Get all information about the device in a single call.
 
         This method updates all GLIMMR information available with a single API
         call.
-
-        Args:
-            full_update: Force a full update from the GLIMMR Device.
 
         Returns:
             GLIMMR Device data.
@@ -208,17 +204,25 @@ class Glimmr:
         Raises:
             GLIMMREmptyResponseError: The GLIMMR device returned an empty response.
         """
-        if self._device is None or full_update:
-            data = await self.request("")
-            if not data:
-                raise GlimmrEmptyResponseError(
-                    f"GLIMMR device at {self.host} returned an empty API"
-                    " response on full update"
-                )
+        data = await self.request("")
+        if not data:
+            raise GlimmrEmptyResponseError(
+                f"GLIMMR device at {self.host} returned an empty API"
+                " response on full update"
+            )
 
-            self._device = SystemData.from_dict(data)
-            print("DEVICE: ", self._device)
-            return self._device
+        sd = SystemData.from_dict(data)
+        self.device = sd
+        await self.update_scenes()
+        print("DEVICE: ", self.device)
+        return self.device
+
+    async def update_scenes(self) -> {}:
+        scenes = await self.request("ambientScenes")
+        print("Scenes: ", scenes)
+        if scenes:
+            await self.device.load_scenes(scenes)
+        return self.device.scenes
 
     async def master(
             self
@@ -227,10 +231,10 @@ class Glimmr:
 
         Args:
         """
-        if self._device is None:
+        if self.device is None:
             await self.update()
 
-        if self._device is None:
+        if self.device is None:
             raise GlimmrError("Unable to communicate with GLIMMR to get the current glimmr_data")
 
     async def mode(self, mode: int) -> None:
@@ -248,9 +252,23 @@ class Glimmr:
         Args:
             scene: Scene ID to change to.
         """
-        await self.request(
-            "ambientScene", method="POST", data=scene
-        )
+        if scene < -1:
+            mode = 0
+            if scene == -2:
+                mode = 1
+            if scene == -3:
+                mode = 2
+            if scene == -4:
+                mode = 3
+            if scene == -5:
+                mode = 4
+            if scene == -6:
+                mode = 5
+            await self.request("ambientScene", method="POST", data=mode)
+        else:
+            await self.request(
+                "ambientScene", method="POST", data=scene
+            )
 
     async def ambient_color(self, color: str) -> None:
         """Update the ambient scene.
