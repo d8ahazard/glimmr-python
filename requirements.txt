@@ -1,0 +1,7 @@
+aiohttp~=3.7.4.post0
+yarl~=1.7.0
+pytest~=6.2.5
+setuptools~=57.0.0
+signalrcore_async~=0.5.4
+backoff~=1.11.1
+requests~=2.26.0

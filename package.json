@@ -1,0 +1,16 @@
+{
+  "name": "glimmr",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Asynchronous Python client for Glimmr",
+  "scripts": {
+    "pyright": "pyright",
+    "prettier": "prettier --write **/*.{json,js,md,yml,yaml} *.{json,js,md,yml,yaml}"
+  },
+  "author": "D8ahazard <donate.to.digitalhigh@gmail.com>",
+  "license": "MIT",
+  "devDependencies": {
+    "prettier": "^2.4.1",
+    "pyright": "^1.1.175"
+  }
+}
