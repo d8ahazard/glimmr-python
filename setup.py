@@ -5,7 +5,7 @@ long_description = (this_directory / "README.md").read_text()
 
 setup(
     name='glimmr',
-    version='1.1.3',
+    version='1.1.5',
     packages=['glimmr'],
     package_dir={'':'src'},
     url='https://github.com/d8ahaard/python-glimmr',

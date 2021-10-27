@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import socket
 from dataclasses import dataclass
 from typing import Any, Callable, Dict
@@ -22,6 +23,8 @@ from .exceptions import (
     GlimmrError,
 )
 from .models import SystemData
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -76,12 +79,12 @@ class Glimmr:
                 self._client = connection
                 # start a connection
                 await connection.start()
-                print("Connected!")
+                _LOGGER.debug("Connected!")
                 self._connected = True
                 connection.on('olo', self.olo)
-                print("OLO!")
+                _LOGGER.debug("OLO!")
                 connection.on('mode', self.dev_mode)
-                print("MODE!")
+                _LOGGER.debug("MODE!")
             except (
 
             ) as exception:
@@ -93,7 +96,7 @@ class Glimmr:
 
     def olo(self, data):
         self.device = SystemData.from_dict(data)
-        print("DEVICE: ", self.device)
+        _LOGGER.debug("DEVICE: ", self.device)
 
     def dev_mode(self, mode):
         if self.device is not None:
@@ -139,9 +142,9 @@ class Glimmr:
             GLIMMRError: Received an unexpected response from the GLIMMR device.
         """
         path = "/api/Glimmr/" + uri
-        print("Path: " + path)
+        _LOGGER.debug("Path: " + path)
         url = URL.build(scheme="http", host=self.host, port=80, path=path)
-        print("URL: ", url)
+        _LOGGER.debug("URL: ", url)
         headers = {
             "Accept": "application/json, text/plain, */*",
         }
@@ -214,12 +217,12 @@ class Glimmr:
         sd = SystemData.from_dict(data)
         self.device = sd
         await self.update_scenes()
-        print("DEVICE: ", self.device)
+        _LOGGER.debug("DEVICE: ", self.device)
         return self.device
 
     async def update_scenes(self) -> {}:
         scenes = await self.request("ambientScenes")
-        print("Scenes: ", scenes)
+        _LOGGER.debug("Scenes: ", scenes)
         if scenes:
             await self.device.load_scenes(scenes)
         return self.device.scenes
@@ -244,7 +247,7 @@ class Glimmr:
             mode: New target device mode.
         """
         await self.request(
-            "/json/mode", method="POST", data=mode
+            "mode", method="POST", data=mode
         )
 
     async def ambient_scene(self, scene: int) -> None:
@@ -275,13 +278,15 @@ class Glimmr:
         Args:
             color: Ambient color to set.
         """
+        _LOGGER.debug("Setting ambient color: " + color)
         await self.request(
             "ambientColor", method="POST", data=color
         )
 
     async def reset(self) -> None:
         """Reboot GLIMMR device."""
-        await self.request("/systemControl", method="POST", data="reboot")
+        _LOGGER.debug("Reboot requested.")
+        await self.request("systemControl", method="POST", data="reboot")
 
     async def close(self) -> None:
         """Close open client (WebSocket) session."""
@@ -306,4 +311,5 @@ class Glimmr:
         await self.close()
 
     async def set(self, device: SystemData):
+        _LOGGER.debug("Updating sd object.")
         await self.request("systemData", method="POST", data=device.to_dict())
