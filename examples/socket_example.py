@@ -2,25 +2,29 @@
 """Asynchronous Python client for GLIMMR."""
 
 import asyncio
+import logging
+import sys
 
-from glimmr import Glimmr, SystemData
+from glimmr import Glimmr
+
+logging.getLogger().addHandler(logging.StreamHandler())
+logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
 
 async def main():
     """Show example on WebSocket usage with GLIMMR."""
     async with Glimmr("192.168.1.34") as led:
-        await led.connect()
+        led.LOGGER = logging
+        led.socket.start()
+        # Start listening
+
+        def something_updated(data):
+            """Call when GLIMMR reports a state change."""  # noqa
+            print("Received an update from glimmr: %s", data[0]["systemData"])
+
+        led.socket.on("olo", something_updated)
         if led.connected:
             print("connected!")
-
-        def something_updated(device) -> None:
-            """Call when GLIMMR reports a state change."""  # noqa
-            print("Received an update from GLIMMR")
-            print(device.version)
-            print(device.device_name)
-
-        # Start listening
-        led.add_callback("olo", something_updated)
 
         # Now we wait...
         await asyncio.sleep(3600)

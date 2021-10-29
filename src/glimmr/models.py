@@ -48,6 +48,7 @@ class SystemData:
     v_sectors: int
     ambient_color: str
     device_name: str
+    device_id: str
     ds_ip: str
     open_rgb_ip: str
     rec_dev: str
@@ -69,7 +70,6 @@ class SystemData:
         Returns:
             A info object.
         """
-        print(data)
         return SystemData(
             auto_disabled=data.get("autoDisabled", "UNKNOWN"),
             auto_remove_devices=data.get("autoRemoveDevices", "UNKNOWN"),
@@ -113,6 +113,7 @@ class SystemData:
             v_sectors=data.get("vSectors", "UNKNOWN"),
             ambient_color=data.get("ambientColor", "UNKNOWN"),
             device_name=data.get("deviceName", "UNKNOWN"),
+            device_id=data.get("deviceId", "UNKNOWN"),
             ds_ip=data.get("dsIp", "UNKNOWN"),
             open_rgb_ip=data.get("openRgbIp", "UNKNOWN"),
             rec_dev=data.get("recDev", "UNKNOWN"),
@@ -122,7 +123,7 @@ class SystemData:
             black_level=data.get("blackLevel", "UNKNOWN"),
             crop_black_level=data.get("cropBlackLevel", "UNKNOWN"),
             version=data.get("version", "UNKNOWN"),
-            scenes=Dict[int, str]
+            scenes={}
         )
 
     def to_dict(self):
@@ -154,6 +155,7 @@ class SystemData:
             "captureMode": self.capture_mode,
             "cropDelay": self.crop_delay,
             "deviceMode": self.device_mode,
+            "deviceId": self.device_id,
             "discoveryTimeout": self.discovery_timeout,
             "hSectors": self.h_sectors,
             "ledCount": self.led_count,
@@ -181,19 +183,35 @@ class SystemData:
             "scenes": self.scenes
         }
 
-    def get_id_from_scene_name(self, name) -> int:
-        if self.scenes is not None:
-            for i in self.scenes.items():
-                if i[0] == name:
-                    return i[1]
-        return -2
 
-    async def load_scenes(self, scenes: List[Dict[str,any]]):
-        scene_dict = {"Video": -2, "Audio": -3, "Ambient": -4, "Audio/Video": -5, "Streaming": -6}
-        for item in scenes:
-            scene_id = item.get("id", "UNKNOWN")
-            scene_name = item.get("name", "UNKNOWN")
-            scene_dict[scene_name] = scene_id
+@dataclass
+class StatData:
+    cpu_usage: int
+    cpu_temp: int
+    fps: Dict[str, int]
+    memory_usage: int
+    temp_max: int
+    temp_min: int
+    uptime: str
+    throttled_state: List[str]
 
-        print("Scene dict: ", scene_dict)
-        self.scenes = scene_dict
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> StatData:
+        """Return Info object from GLIMMR API response.
+
+        Args:
+            data: The data from the GLIMMR device API.
+
+        Returns:
+            A info object.
+        """
+        return StatData(
+            cpu_usage=data.get("cpuUsage", 0),
+            cpu_temp=data.get("cpuTemp", 0),
+            fps=data.get("fps", {}),
+            memory_usage=data.get("memoryUsage", 0),
+            temp_max=data.get("tempMax", 0),
+            temp_min=data.get("tempMin", 0),
+            uptime=data.get("uptime", ""),
+            throttled_state=data.get("throttledState", [])
+        )

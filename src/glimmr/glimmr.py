@@ -5,15 +5,17 @@ import json
 import logging
 import socket
 from dataclasses import dataclass
-from typing import Any, Callable, Dict
+from typing import Any, Dict, List
 
 import aiohttp
 import async_timeout
 import backoff
 from requests import Session
-from signalrcore_async.hub.auth_hub_connection import AuthHubConnection
-from signalrcore_async.hub.base_hub_connection import BaseHubConnection
-from signalrcore_async.hub_connection_builder import HubConnectionBuilder
+from signalrcore.hub.auth_hub_connection import AuthHubConnection
+from signalrcore.hub.base_hub_connection import BaseHubConnection
+from signalrcore.hub_connection_builder import HubConnectionBuilder
+from signalrcore.subject import Subject
+from signalrcore.transport.websockets.connection import ConnectionState
 from yarl import URL
 
 from .exceptions import (
@@ -22,108 +24,87 @@ from .exceptions import (
     GlimmrEmptyResponseError,
     GlimmrError,
 )
-from .models import SystemData
-
-_LOGGER = logging.getLogger(__name__)
+from .models import SystemData, StatData
 
 
 @dataclass
 class Glimmr:
-    """Main class for handling connections with GLIMMR."""
-
+    """
+    Main class for handling connections with Glimmr.
+    this is presently an incomplete implementation of the
+    Glimmr api, focusing primarily on features relevant to
+    Home Assistant.
+    """
     host: str
+    ambient_scenes: Dict[str, int]
+    audio_scenes: Dict[str, int]
     request_timeout: float = 8.0
     session: aiohttp.ClientSession | None = None
-    _client: AuthHubConnection | BaseHubConnection | None = None
+    socket: AuthHubConnection | BaseHubConnection | None = None
+    system_data: SystemData | None = None
+    stats: StatData | None = None
     _close_session: bool = False
-    device: SystemData | None = None
-    _connected: bool = False
+    LOGGER = logging.getLogger(__name__)
+
+    def __init__(self, host: str):
+        self.host = host
+        with Session():
+            url = "http://" + self.host + "/socket"
+            self.LOGGER.debug("Websocket url: " + url)
+            self.socket = HubConnectionBuilder() \
+                .with_url(url) \
+                .build()
+            self.socket.on('olo', self.ws_olo)
+            self.socket.on('mode', self.set_mode)
+
+    async def __aenter__(self) -> Glimmr:
+        """Async enter."""
+        return self
+
+    async def __aexit__(self, *_exc_info) -> None:
+        """Async exit."""
+        await self.socket.stop()
 
     @property
     def connected(self) -> bool:
-        """Return if we are connect to the WebSocket of a GLIMMR device.
+        """Return if we are connect to the WebSocket of a Glimmr device.
 
         Returns:
-            True if we are connected to the WebSocket of a GLIMMR device,
+            True if we are connected to the WebSocket of a Glimmr device,
             False otherwise.
         """
-        return self._connected
+        return self.socket.transport.state == ConnectionState.connected
 
-    async def connect(self) -> None:
-        """Connect to the WebSocket of a GLIMMR device.
-
-        Raises:
-            GLIMMRError: The configured GLIMMR device, does not support WebSocket
-                communications.
-            GLIMMRConnectionError: Error occurred while communicating with
-                the GLIMMR device via the WebSocket.
+    def ws_olo(self, data) -> None:
         """
-        if self.connected:
-            return
+        Handler for websocket store data.
+        @param data: Glimmr StoreData object.
+        """
+        self.LOGGER.debug("OLO FIRED: ", data[0]["systemData"])
+        self.system_data = SystemData.from_dict(data[0]["systemData"])
+        self.load_scenes(data[0]["ambientScenes"])
+        self.stats = StatData.from_dict(data[0]["stats"])
 
-        if not self.device:
-            await self.update()
-
-        with Session():
-            url = "http://" + self.host + "/socket"
-            connection = HubConnectionBuilder() \
-                .with_url(url) \
-                .build()
-
-            if not self.session or not self.device:
-                raise GlimmrError(
-                    "The Glimmr device at {self.host} does not support WebSockets"
-                )
-
-            try:
-                self._client = connection
-                # start a connection
-                await connection.start()
-                _LOGGER.debug("Connected!")
-                self._connected = True
-                connection.on('olo', self.olo)
-                _LOGGER.debug("OLO!")
-                connection.on('mode', self.dev_mode)
-                _LOGGER.debug("MODE!")
-            except (
-
-            ) as exception:
-                self._connected = False
-                raise GlimmrConnectionError(
-                    "Error occurred while communicating with GLIMMR device"
-                    f" on WebSocket at {self.host}"
-                ) from exception
-
-    def olo(self, data):
-        self.device = SystemData.from_dict(data)
-        _LOGGER.debug("DEVICE: ", self.device)
-
-    def dev_mode(self, mode):
-        if self.device is not None:
-            self.device.device_mode = mode
-
-    async def disconnect(self) -> None:
-        """Disconnect from the WebSocket of a GLIMMR device."""
-        if not self._client or not self.connected:
-            return
-
-        await self._client.stop()
-        self._connected = False
-
-    def add_callback(self, method, callback: Callable[[SystemData], None]):
-        self._client.on(method, callback)
+    def ws_mode(self, mode: {}) -> None:
+        """
+        Update the stored mode from websocket.
+        @param mode: The new device mode
+        """
+        if self.system_data is not None:
+            self.LOGGER.debug("Registering dev mode change from ws: ", mode[0])
+            self.system_data.device_mode = mode[0]
 
     @backoff.on_exception(backoff.expo, GlimmrConnectionError, max_tries=3, logger=None)
     async def request(
             self,
             uri: str = "",
             method: str = "GET",
-            data: int | str | Dict[str, any] | None = None,
+            data: Any | None = None,
     ) -> Any:
         """Handle a request to a Glimmr device.
 
         A generic method for sending/handling HTTP requests done gainst
-        the GLIMMR device.
+        the Glimmr device.
 
         Args:
             uri: Request URI, for example `/json/si`.
@@ -132,29 +113,30 @@ class Glimmr:
 
         Returns:
             A Python dictionary (JSON decoded) with the response from the
-            GLIMMR device.
+            Glimmr device.
 
         Raises:
-            GLIMMRConnectionError: An error occurred while communitcation with
-                the GLIMMR device.
-            GLIMMRConnectionTimeoutError: A timeout occurred while communicating
-                with the GLIMMR device.
-            GLIMMRError: Received an unexpected response from the GLIMMR device.
+            GlimmrConnectionError: An error occurred while communitcation with
+                the Glimmr device.
+            GlimmrConnectionTimeoutError: A timeout occurred while communicating
+                with the Glimmr device.
+            GlimmrError: Received an unexpected response from the Glimmr device.
         """
         path = "/api/Glimmr/" + uri
-        _LOGGER.debug("Path: " + path)
         url = URL.build(scheme="http", host=self.host, port=80, path=path)
-        _LOGGER.debug("URL: ", url)
+        self.LOGGER.debug("URL: %s", url)
         headers = {
             "Accept": "application/json, text/plain, */*",
         }
 
         if self.session is None:
+            self.LOGGER.debug("Setting session...")
             self.session = aiohttp.ClientSession()
             self._close_session = True
 
         try:
             with async_timeout.timeout(self.request_timeout):
+                self.LOGGER.debug("Awaiting response...")
                 response = await self.session.request(
                     method,
                     url,
@@ -163,11 +145,11 @@ class Glimmr:
                 )
         except asyncio.TimeoutError as exception:
             raise GlimmrRConnectionTimeoutError(
-                f"Timeout occurred while connecting to GLIMMR device at {self.host}"
+                f"Timeout occurred while connecting to Glimmr device at {self.host}"
             ) from exception
         except (aiohttp.ClientError, socket.gaierror) as exception:
             raise GlimmrConnectionError(
-                f"Error occurred while communicating with GLIMMR device at {self.host}"
+                f"Error occurred while communicating with Glimmr device at {self.host}"
             ) from exception
 
         content_type = response.headers.get("Content-Type", "")
@@ -184,65 +166,54 @@ class Glimmr:
             if (
                     method == "POST"
                     and uri == "systemData"
-                    and self.device is not None
+                    and self.system_data is not None
                     and data is not None
             ):
-                self.device.from_dict(data={"glimmr_data": response_data})
+                self.system_data.from_dict(data={"glimmr_data": response_data})
             return response_data
-
         return await response.text()
 
     @backoff.on_exception(
         backoff.expo, GlimmrEmptyResponseError, max_tries=3, logger=None
     )
-    async def update(self) -> SystemData:
+    async def update(self):
         """Get all information about the device in a single call.
 
-        This method updates all GLIMMR information available with a single API
+        This method updates all Glimmr information available with a single API
         call.
 
         Returns:
-            GLIMMR Device data.
+            Glimmr Device data.
 
         Raises:
-            GLIMMREmptyResponseError: The GLIMMR device returned an empty response.
+            GlimmrEmptyResponseError: The Glimmr device returned an empty response.
         """
-        data = await self.request("")
-        if not data:
-            raise GlimmrEmptyResponseError(
-                f"GLIMMR device at {self.host} returned an empty API"
-                " response on full update"
-            )
+        if self.connected:
+            subject = Subject()
+            self.LOGGER.debug("Requesting store data via websocket.")
+            self.socket.send("store", subject)
+            return
 
-        sd = SystemData.from_dict(data)
-        self.device = sd
-        await self.update_scenes()
-        _LOGGER.debug("DEVICE: ", self.device)
-        return self.device
+        else:
+            self.LOGGER.debug("Updating via GET")
+            data = await self.request("store")
+            if not data:
+                raise GlimmrEmptyResponseError(
+                    f"Glimmr device at {self.host} returned an empty API"
+                    " response on full update"
+                )
+            self.LOGGER.debug("GOT: %s", data["systemData"])
+            self.system_data = SystemData.from_dict(data["systemData"])
+            self.load_scenes(data["ambientScenes"])
 
-    async def update_scenes(self) -> {}:
+    async def update_scenes(self):
         scenes = await self.request("ambientScenes")
-        _LOGGER.debug("Scenes: ", scenes)
         if scenes:
-            await self.device.load_scenes(scenes)
-        return self.device.scenes
+            self.load_scenes(scenes)
 
-    async def master(
-            self
-    ):
-        """Change master glimmr_data of a GLIMMR Light device.
-
-        Args:
+    async def set_mode(self, mode: int) -> None:
         """
-        if self.device is None:
-            await self.update()
-
-        if self.device is None:
-            raise GlimmrError("Unable to communicate with GLIMMR to get the current glimmr_data")
-
-    async def mode(self, mode: int) -> None:
-        """Set the default transition time for manual control.
-
+        Set the new device mode.
         Args:
             mode: New target device mode.
         """
@@ -250,66 +221,87 @@ class Glimmr:
             "mode", method="POST", data=mode
         )
 
-    async def ambient_scene(self, scene: int) -> None:
-        """Update the ambient scene.
+    async def set_ambient_scene(self, scene: int) -> None:
+        """
+        Update the ambient scene.
         Args:
             scene: Scene ID to change to.
         """
-        if scene < -1:
-            mode = 0
-            if scene == -2:
-                mode = 1
-            if scene == -3:
-                mode = 2
-            if scene == -4:
-                mode = 3
-            if scene == -5:
-                mode = 4
-            if scene == -6:
-                mode = 5
-            await self.request("ambientScene", method="POST", data=mode)
-        else:
-            await self.request(
-                "ambientScene", method="POST", data=scene
-            )
+        await self.request(
+            "ambientScene", method="POST", data=scene
+        )
 
-    async def ambient_color(self, color: str) -> None:
-        """Update the ambient scene.
-        Args:
-            color: Ambient color to set.
+    async def set_audio_scene(self, scene: int) -> None:
         """
-        _LOGGER.debug("Setting ambient color: " + color)
+        Update the ambient scene.
+        Args:
+            scene: Scene ID to change to.
+        """
+        await self.request(
+            "ambientScene", method="POST", data=scene
+        )
+
+    async def set_ambient_color(self, color: str) -> None:
+        """
+        Update the ambient scene.
+        Args:
+            color: Ambient color to set in a hex formatted string
+            with no '#'.
+        """
+        self.LOGGER.debug("Setting ambient color: " + color)
         await self.request(
             "ambientColor", method="POST", data=color
         )
 
-    async def reset(self) -> None:
-        """Reboot GLIMMR device."""
-        _LOGGER.debug("Reboot requested.")
+    async def set_system_data(self):
+        """
+        Push current settings to Glimmr for update.
+        """
+        self.LOGGER.debug("Updating sd object.")
+        await self.request("systemData", method="POST", data=self.system_data.to_dict())
+
+    async def reboot(self) -> None:
+        """
+        Reboot Glimmr device.
+        """
+        self.LOGGER.debug("Reboot requested.")
         await self.request("systemControl", method="POST", data="reboot")
 
-    async def close(self) -> None:
-        """Close open client (WebSocket) session."""
-        await self.disconnect()
-        if self.session and self._close_session:
-            await self.session.close()
-
-    async def __aenter__(self) -> Glimmr:
-        """Async enter.
-
-        Returns:
-            The GLIMMR object.
+    def get_scene_id_from_name(self, name) -> int | None:
         """
-        return self
-
-    async def __aexit__(self, *_exc_info) -> None:
-        """Async exit.
-
-        Args:
-            _exc_info: Exec type.
+        Fetch ambient scene id by name.
+        @param name: Scene name to look up.
+        @return Scene id if found or None
         """
-        await self.close()
+        if self.ambient_scenes is not None:
+            for i in self.ambient_scenes.items():
+                if i[0] == name:
+                    return i[1]
+        return None
 
-    async def set(self, device: SystemData):
-        _LOGGER.debug("Updating sd object.")
-        await self.request("systemData", method="POST", data=device.to_dict())
+    def get_scene_name_from_id(self, scene) -> str | None:
+        """
+        Fetch ambient scene name by id.
+        @param scene:
+        @return: A string with the scene name if found or None.
+        """
+        if self.ambient_scenes is not None:
+            for i in self.ambient_scenes.items():
+                if i[1] == scene:
+                    return i[0]
+        return None
+
+    def load_scenes(self, scenes: List[Dict[str, int]]):
+        """
+        Load scenes from store data.
+        @param scenes: Data from store object/api.
+        """
+        #  Sneaky way of hiding mode controls in the scene selection
+        scene_dict = {"Video": -2, "Audio": -3, "Ambient": -4, "Audio/Video": -5, "Streaming": -6}
+        for item in scenes:
+            scene_id = item.get("id", 0)
+            scene_name = item.get("name", "")
+            scene_dict[scene_name] = scene_id
+
+        self.LOGGER.debug("Scene dict: ", scene_dict)
+        self.ambient_scenes = scene_dict

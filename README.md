@@ -20,29 +20,33 @@ pip install glimmr
 import asyncio
 from glimmr import Glimmr
 
+
 async def main():
     """Show example on controlling your GLIMMR device."""
     async with Glimmr("glimmr-333.local") as led:
-        device = await led.update()
-        print(device.info.version)
+        # Fetch data
+        await led.update()
+        print(led.system_data)
         # Add callback for data from web socket
-        led.add_callback("olo", data_updated)
+        led.socket.on("olo", data_updated)
 
         # Set device to video mode
-        await led.mode(1)
+        await led.set_mode(1)
         await asyncio.sleep(1000)
         # Ambient color
-        await led.ambient_color("FF00FF")
+        await led.set_ambient_color("FF00FF")
         await asyncio.sleep(1000)
         # Ambient scene
-        await led.ambient_scene(4)
+        await led.set_ambient_scene(4)
         await asyncio.sleep(1000)
         # Set device to "off"
-        await led.mode(0)
+        await led.set_mode(0)
+
 
 def data_updated(self, data):
     print("Websocket callback: ", data)
-    
+
+
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())

@@ -658,4 +658,4 @@ async def test_reset(aresponses):
 
     async with aiohttp.ClientSession() as session:
         glimmr = Glimmr("example.com", session=session)
-        await glimmr.reset()
+        await glimmr.reboot()

@@ -1,13 +1,14 @@
 from setuptools import setup
 from pathlib import Path
+
 this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()
 
 setup(
     name='glimmr',
-    version='1.1.5',
+    version='1.2.0',
     packages=['glimmr'],
-    package_dir={'':'src'},
+    package_dir={'': 'src'},
     url='https://github.com/d8ahaard/python-glimmr',
     license='MIT',
     author='d8ahazard',
